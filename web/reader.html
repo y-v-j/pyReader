@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>pyReader</title>
+  <link rel="stylesheet" href="reader.css">
+</head>
+<body>
+  <header id="top">
+    <div class="left">
+      <span class="icon"></span>
+      <span id="title">pyReader</span>
+      <span id="author"></span>
+    </div>
+    <div class="right">
+      <span id="chapterTitle"></span>
+      <span id="clock"></span>
+    </div>
+  </header>
+  <div class="divider"></div>
+
+  <main id="stage">
+    <div class="page" id="pageL"><div class="folio" id="folioL"></div></div>
+    <div class="page" id="pageR"><div class="folio" id="folioR"></div></div>
+    <div id="spine"></div>
+    <iframe id="book" title="Book" sandbox="allow-same-origin"></iframe>
+    <div id="leaf"></div>
+    <div id="message" class="hidden">
+      <div class="glyph"></div>
+      <h1 id="messageTitle"></h1>
+      <div id="messageBody"></div>
+    </div>
+  </main>
+
+  <footer id="bottom">
+    <div id="progress"><div id="progressFill"></div></div>
+    <div class="row">
+      <span id="where"></span>
+      <span id="keys"><b>← →</b> turn &nbsp;·&nbsp; <b>a z</b> text size &nbsp;·&nbsp; <b>Ctrl</b>+drag select &nbsp;·&nbsp; <b>Ctrl+Shift</b>+drag highlight</span>
+      <span id="pct"></span>
+    </div>
+  </footer>
+
+  <div id="toast"></div>
+  <script src="reader.js"></script>
+</body>
+</html>

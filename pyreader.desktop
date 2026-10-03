@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=pyReader
+Comment=EPUB reader that lives on your desktop
+Exec=sh -c '"$HOME/.local/share/pyreader/launch.sh"'
+Icon=accessories-ebook-reader
+Terminal=false
+Categories=Office;Viewer;
+X-KDE-autostart-after=panel
+X-GNOME-Autostart-enabled=true

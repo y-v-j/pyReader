@@ -1,0 +1,205 @@
+/* pyReader — "Midnight Ink" theme, shared with pySysMon and pyQuotes */
+:root {
+  --bg: #191926;
+  --card: #20202f;
+  --card-hi: #262638;
+  --edge: #2b2b40;
+  --track: #2c2c42;
+  --fg: #e8e8f2;
+  --label: #9a9ab8;
+  --dim: #62627e;
+  --sky: #7dd3fc;
+  --lavender: #c4b5fd;
+  --rose: #f9a8d4;
+  --mint: #86efac;
+  --butter: #fde68a;
+  --coral: #fca5a5;
+  --ui-font: "FantasqueSansM Nerd Font", "Fantasque Sans Mono", "JetBrainsMono Nerd Font", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  overflow: hidden;
+  user-select: none;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px 12px;
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+#top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  font-size: 15px;
+  white-space: nowrap;
+}
+#top .left, #top .right { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+#top .left { flex: 1; overflow: hidden; }
+.icon::before { content: "\f02d"; color: var(--lavender); }
+#title { color: var(--rose); font-weight: bold; overflow: hidden; text-overflow: ellipsis; }
+#author { color: var(--label); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+#chapterTitle { color: var(--label); font-size: 13px; max-width: 34ch; overflow: hidden; text-overflow: ellipsis; }
+#clock { color: var(--sky); font-weight: bold; }
+
+.divider {
+  height: 2px;
+  margin: 10px 0 14px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, var(--sky), var(--lavender), var(--rose));
+}
+
+/* ── Book stage ─────────────────────────────────────────── */
+#stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  perspective: 2400px;
+}
+
+.page {
+  position: absolute;
+  top: 0;
+  background: linear-gradient(180deg, var(--card-hi), var(--card) 18%);
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+#pageL::before {               /* accent notch, as on the pySysMon / pyQuotes cards */
+  content: "";
+  position: absolute;
+  left: -1px; top: 16px;
+  width: 3px; height: 20px;
+  border-radius: 2px;
+  background: var(--lavender);
+}
+#pageL { background: linear-gradient(90deg, var(--card) 88%, #1c1c2a), linear-gradient(180deg, var(--card-hi), var(--card) 18%); }
+#pageR { background: linear-gradient(270deg, var(--card) 88%, #1c1c2a); }
+
+.folio {
+  position: absolute;
+  bottom: 12px;
+  left: 0; right: 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--dim);
+  letter-spacing: 0.08em;
+}
+
+#spine {
+  position: absolute;
+  top: 6px; bottom: 6px;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.45), transparent 70%);
+}
+
+#book {
+  position: absolute;
+  border: 0;
+  background: transparent;
+  color-scheme: dark;
+  transition: opacity 160ms ease;
+}
+
+#leaf {
+  position: absolute;
+  top: 0;
+  display: none;
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.28), transparent 18%, transparent 82%, rgba(255, 255, 255, 0.05)),
+    repeating-linear-gradient(180deg, transparent 0 26px, rgba(232, 232, 242, 0.035) 26px 27px),
+    var(--card);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  backface-visibility: visible;
+  will-change: transform;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* ── Empty / error message ──────────────────────────────── */
+#message {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: min(560px, 90%);
+  height: fit-content;
+  padding: 28px 30px;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  z-index: 6;
+  text-align: center;
+  user-select: text;
+}
+#message.hidden { display: none; }
+#message .glyph::before { content: "\f02d"; font-size: 40px; color: var(--lavender); }
+#message h1 { margin: 10px 0 8px; font-size: 20px; color: var(--rose); }
+#message.error h1 { color: var(--coral); }
+#messageBody { color: var(--label); font-size: 14px; line-height: 1.6; }
+#messageBody code, #messageBody pre { color: var(--sky); font-family: var(--ui-font); }
+#messageBody pre {
+  text-align: left;
+  background: var(--bg);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 12px 0;
+}
+
+/* ── Footer ─────────────────────────────────────────────── */
+#bottom { margin-top: 12px; }
+#progress { height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; }
+#progressFill {
+  height: 100%;
+  width: 0;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--sky), var(--lavender), var(--rose));
+  transition: width 300ms ease;
+}
+#bottom .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+#where { color: var(--label); overflow: hidden; text-overflow: ellipsis; }
+#keys { color: var(--dim); }
+#keys b { color: var(--label); font-weight: normal; }
+#pct { color: var(--lavender); font-weight: bold; }
+@media (max-width: 900px) { #keys { display: none; } }
+
+/* ── Toast ──────────────────────────────────────────────── */
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 54px;
+  transform: translate(-50%, 12px);
+  padding: 8px 16px;
+  background: var(--card-hi);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  color: var(--fg);
+  font-size: 13px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease;
+  z-index: 10;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+#toast.error { border-color: var(--coral); color: var(--coral); }
