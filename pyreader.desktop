@@ -2,7 +2,8 @@
 Type=Application
 Name=pyReader
 Comment=EPUB reader that lives on your desktop
-Exec=sh -c '"$HOME/.local/share/pyreader/launch.sh"'
+# "~", not "$HOME": systemd's autostart generator escapes "$", so sh would never expand it
+Exec=sh -c "exec ~/.local/share/pyreader/launch.sh"
 Icon=accessories-ebook-reader
 Terminal=false
 Categories=Office;Viewer;

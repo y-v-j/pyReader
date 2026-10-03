@@ -229,6 +229,9 @@ This removes the app, launcher and startup entries. Your settings, reading posit
 **The book shows an error instead of opening.**
 Check the path in `~/.config/pyreader/pyreader.toml`. pyReader shows the exact problem: a missing file, a DRM-protected book, or a damaged EPUB. DRM-protected books can't be opened.
 
+**pyReader doesn't start at login.**
+Run `systemctl --user status app-pyreader@autostart.service`. If the log shows `$HOME/.local/share/pyreader/launch.sh: No such file or directory`, your autostart entry comes from an older release whose `Exec=` line used `$HOME`. KDE Plasma and GNOME run autostart entries through systemd, which escapes the `$`, so the path is never expanded. Re-run `./install.sh`, or copy the current `pyreader.desktop` to `~/.config/autostart/`.
+
 **pyReader covers other windows.**
 It asks the window manager to keep it below other windows (`_NET_WM_STATE_BELOW`). This works on KWin and most EWMH-compliant window managers. pyReader always runs through XWayland for this reason.
 
