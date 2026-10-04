@@ -21,6 +21,7 @@ const PYR = (() => {
     chapter: 0, page: 0, pages: 1,
     highlights: {}, L: null,
     loadToken: 0, animating: false, busy: false,
+    back: [],                    // places left by following links (Shift+← returns)
   };
 
   const send = (msg) => console.log("PYR:" + JSON.stringify(msg));
@@ -440,7 +441,8 @@ const PYR = (() => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     switch (e.key) {
       case "ArrowRight": case "PageDown": case " ": next(); break;
-      case "ArrowLeft": case "PageUp": case "Backspace": prev(); break;
+      case "ArrowLeft": case "Backspace": e.shiftKey ? goBack() : prev(); break;
+      case "PageUp": prev(); break;
       case "a": case "A": zoom(1); break;
       case "z": case "Z": zoom(-1); break;
       case "Home": if (S.book) showPage(0); break;
@@ -516,8 +518,27 @@ const PYR = (() => {
     const href = path.slice(prefix.length);
     const anchor = url.hash ? decodeURIComponent(url.hash.slice(1)) : null;
     const idx = S.book.chapters.findIndex((c) => c.href === href);
-    if (idx === S.chapter) { if (anchor) showPage(pageOfAnchor(anchor), animationsOn(), 1); }
-    else if (idx >= 0) loadChapter(idx, anchor ? { anchor } : {});
+    if (idx < 0 || (idx === S.chapter && !anchor)) return;
+    // Remember the page with the link. Its id, when it has one, finds that
+    // page again even if the text size or window changed in the meantime.
+    S.back.push({ chapter: S.chapter, fraction: S.pages ? S.page / S.pages : 0, anchor: a.id || null });
+    if (S.back.length > 50) S.back.shift();
+    if (idx === S.chapter) showPage(pageOfAnchor(anchor), animationsOn(), 1);
+    else loadChapter(idx, { anchor });
+    toast("Shift+← to go back");
+  }
+
+  function goBack() {
+    if (!S.book || S.busy) return;
+    const place = S.back.pop();
+    if (!place) { toast("No link to go back from"); return; }
+    if (S.animating) finishTurn();
+    if (place.chapter !== S.chapter) {
+      loadChapter(place.chapter, place.anchor ? { anchor: place.anchor } : { fraction: place.fraction });
+    } else {
+      showPage(place.anchor ? pageOfAnchor(place.anchor) : Math.floor(place.fraction * S.pages + 1e-6),
+               animationsOn(), -1);
+    }
   }
 
   // ── Highlights (stored as text offsets within the chapter) ──────────────
@@ -665,6 +686,7 @@ const PYR = (() => {
     }
     $("message").className = "hidden";
     S.book = p.book;
+    S.back = [];
     S.highlights = p.highlights || {};
     $("title").textContent = p.book.title;
     $("author").textContent = p.book.author ? "by " + p.book.author : "";

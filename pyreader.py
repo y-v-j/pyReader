@@ -12,7 +12,8 @@ Qt WebEngine in the same "Midnight Ink" theme as pySysMon and pyQuotes.
 - Reading position, text size and highlights are remembered per book in
   ~/.local/state/pyreader/state.json.
 
-Keys: ← / → turn pages, a / z change the text size.
+Keys: ← / → turn pages, a / z change the text size, Shift + ← returns to the
+page a link or footnote was followed from.
 Ctrl + drag selects text (Ctrl+C copies); Ctrl + Shift + drag highlights it,
 Ctrl + Shift + click on a highlight removes it.
 """

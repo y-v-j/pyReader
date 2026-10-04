@@ -19,6 +19,7 @@ An EPUB reader that lives on your Linux desktop. It fills the free space beside 
 - **Equations:** MathML is rendered natively with the bundled STIX Two Math font: fractions, roots, integrals, matrices, bold vectors, chemistry.
 - **Sharp images:** pictures are shown at their native resolution and never stretched beyond it, so they never look grainy. Large images are scaled down to fit the page.
 - **Select, copy and highlight:** Ctrl + drag selects text to copy. Ctrl + Shift + drag highlights it in warm amber. Highlights are saved per book.
+- **Footnotes without losing your place:** click a superscript to read its note, then press Shift + ← to return to the page you were reading. It retraces several links in a row and finds the right page even if you changed the text size in between.
 - **Remembers everything:** the book, the page and the text size are restored after a restart or login.
 - **Instant book switching:** the book's path lives in a small config file; save it and the new book opens immediately.
 - **Fits around your widgets:** it detects pySysMon and pyQuotes and fills the space to their left, re-checking every few seconds.
@@ -148,6 +149,7 @@ The demo has public-domain prose (the opening of *Alice's Adventures in Wonderla
 | Highlight text | Hold **Ctrl+Shift** and drag |
 | Remove a highlight | **Ctrl+Shift+click** on it |
 | Follow a link or footnote | Click it (web links open in your browser) |
+| Go back to where you clicked a link | **Shift+←** or Shift+Backspace (repeat to retrace several links) |
 
 Click the reader once to give it keyboard focus. Plain clicks never start a selection, so you can't select text by accident while turning pages.
 
