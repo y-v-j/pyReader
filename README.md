@@ -22,7 +22,7 @@ An EPUB reader that lives on your Linux desktop. It fills the free space beside 
 - **Footnotes without losing your place:** click a superscript to read its note, then press Shift + ← to return to the page you were reading. It retraces several links in a row and finds the right page even if you changed the text size in between.
 - **Remembers everything:** the book, the page and the text size are restored after a restart or login.
 - **Instant book switching:** the book's path lives in a small config file; save it and the new book opens immediately.
-- **Fits around your widgets:** it detects pySysMon and pyQuotes and fills the space to their left, re-checking every few seconds.
+- **Fits around your widgets:** it detects pySysMon and pyQuotes and fills the space to their left, and keeps below X11 bars such as [kBar](https://github.com/y-v-j/kBar) (KWin on Wayland doesn't reserve their space), re-checking every few seconds.
 - **Lives on the desktop:** it stays below other windows and doesn't appear in the taskbar, pager or Alt+Tab.
 - **Private:** books never touch the network. Remote resources are blocked, and nothing is cached on disk.
 

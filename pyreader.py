@@ -441,6 +441,21 @@ class X11:
             out.append((raw.decode("utf-8", "replace"), rx.value, ry.value, gw.value, gh.value))
         return out
 
+    def dock_struts(self):
+        """[left, right, top, bottom] pixels reserved by X11 docks such as polybar.
+        KWin on Wayland leaves X11 struts out of the work area, so read them here."""
+        out = [0, 0, 0, 0]
+        if not self.d:
+            return out
+        dock = self.atom("_NET_WM_WINDOW_TYPE_DOCK")
+        for w in self._prop(self.root, "_NET_CLIENT_LIST", 33) or []:            # 33 = XA_WINDOW
+            if dock not in (self._prop(w, "_NET_WM_WINDOW_TYPE", 4) or []):       # 4 = XA_ATOM
+                continue
+            strut = self._prop(w, "_NET_WM_STRUT_PARTIAL", 6) or self._prop(w, "_NET_WM_STRUT", 6) or []
+            for i, v in enumerate(strut[:4]):                                     # 6 = XA_CARDINAL
+                out[i] = max(out[i], v)
+        return out
+
     def keep_on_desktop(self, window):
         if not self.d:
             return
@@ -521,15 +536,18 @@ class Reader(QWebEngineView):
         ratio = screen.devicePixelRatio() or 1
         cfg = self.config
         margin, gap = int(cfg.get("margin", 24)), int(cfg.get("gap", 16))
-        left, top = area.x() + margin, area.y() + margin
-        bottom = area.y() + area.height() - margin
+        full = screen.geometry()
+        sl, sr, st, sb = (v / ratio for v in self.x11.dock_struts())
+        left = max(area.x(), full.x() + sl) + margin
+        top = max(area.y(), full.y() + st) + margin
+        bottom = min(area.y() + area.height(), full.y() + full.height() - sb) - margin
         avoid = set(cfg.get("avoid_windows") or [])
         lefts = [x / ratio for (title, x, y, w, h) in self.x11.client_windows()
                  if title in avoid and w > 0 and x / ratio > left + 200]
         if lefts:
             right = min(lefts) - gap
         else:
-            right = area.x() + area.width() - int(cfg.get("reserve_right", 876))
+            right = min(area.x() + area.width(), full.x() + full.width() - sr) - int(cfg.get("reserve_right", 876))
         width = max(420, int(right - left))
         return int(left), int(top), width, max(320, int(bottom - top))
 
