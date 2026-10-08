@@ -199,6 +199,9 @@ class Book:
         for item in opf.findall("opf:manifest/opf:item", NS):
             manifest[item.get("id")] = (self.resolve(opf_dir, item.get("href", "")),
                                         item.get("media-type", ""), item.get("properties", ""))
+        # XHTML chapters are often named .html; parsed as HTML, a self-closing
+        # <a id="page_7"/> swallows the rest of the chapter, so trust the manifest.
+        self.xhtml = {href.lower() for href, mt, _ in manifest.values() if mt == "application/xhtml+xml"}
 
         spine = opf.find("opf:spine", NS)
         refs = spine.findall("opf:itemref", NS) if spine is not None else []
@@ -324,7 +327,12 @@ class SchemeHandler(QWebEngineUrlSchemeHandler):
                     raise KeyError(path)
                 data = self.book.read(inner)
                 # Chapters that aren't well-formed XML are retried as HTML
-                mime = "text/html" if url.query() == "as=html" else mime_for(inner)
+                if url.query() == "as=html":
+                    mime = "text/html"
+                elif inner.lower() in self.book.xhtml:
+                    mime = "application/xhtml+xml"
+                else:
+                    mime = mime_for(inner)
             else:
                 raise KeyError(path)
         except (KeyError, ValueError, OSError, zipfile.BadZipFile):

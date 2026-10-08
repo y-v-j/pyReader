@@ -122,8 +122,8 @@ const PYR = (() => {
       h2, h2 * { color: #7dd3fc !important; }
       h3, h3 * { color: #f9a8d4 !important; }
       h4, h5, h6, h4 *, h5 *, h6 * { color: #9a9ab8 !important; }
-      a, a * { color: #f9a8d4 !important; text-decoration: none !important; }
-      a { border-bottom: 1px dotted rgba(249, 168, 212, 0.6) !important; }
+      a[href], a[href] * { color: #f9a8d4 !important; text-decoration: none !important; }
+      a[href] { border-bottom: 1px dotted rgba(249, 168, 212, 0.6) !important; }
       blockquote { border-left: 3px solid #c4b5fd !important; }
       hr { border: 0 !important; height: 2px !important; margin: 1.4em 18% !important; opacity: 0.75;
            background: linear-gradient(90deg, #7dd3fc, #c4b5fd, #f9a8d4) !important; }
