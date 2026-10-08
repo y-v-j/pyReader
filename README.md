@@ -18,7 +18,9 @@ An EPUB reader that lives on your Linux desktop. It fills the free space beside 
 - **The book's own fonts:** embedded fonts and the book's typography are honoured. Noto Serif is used only when the book doesn't choose a font.
 - **Equations:** MathML is rendered natively with the bundled STIX Two Math font: fractions, roots, integrals, matrices, bold vectors, chemistry.
 - **Sharp images:** pictures are shown at their native resolution and never stretched beyond it, so they never look grainy. Large images are scaled down to fit the page.
-- **Select, copy and highlight:** Ctrl + drag selects text to copy. Ctrl + Shift + drag highlights it in warm amber. Highlights are saved per book.
+- **Select, copy and highlight:** Ctrl + drag selects text to copy. Ctrl + Shift + drag highlights it in warm amber.
+- **Highlights live in the book:** they are written into the EPUB file itself, so [Foliate](https://johnfactotum.github.io/foliate/), Calibre and other readers show them too.
+- **Highlights index:** **Ctrl+B** slides in a list of every highlight in the book, grouped by chapter. Click one (or pick it with ↑ ↓ and Enter) to open the page it's on. The panel slides over the pages, so the window never changes size.
 - **Footnotes without losing your place:** click a superscript to read its note, then press Shift + ← to return to the page you were reading. It retraces several links in a row and finds the right page even if you changed the text size in between.
 - **Remembers everything:** the book, the page and the text size are restored after a restart or login.
 - **Instant book switching:** the book's path lives in a small config file; save it and the new book opens immediately.
@@ -43,6 +45,14 @@ Set `pages = 1` for a single page across the whole window, or `pages = 2` for tw
 | <img src="assets/screenshot-single-math.png" alt="Equations on a single full-width page" width="440"> | <img src="assets/screenshot-math.png" alt="Equations, a highlight and an image on two pages" width="440"> |
 
 MathML equations drawn with STIX Two Math, a saved highlight, and a 1600 × 1000 image scaled down without loss.
+
+### Highlights index (Ctrl+B)
+
+<p align="center">
+  <img src="assets/screenshot-highlights.png" alt="The highlights index slid in from the right, listing three highlights under their chapter titles" width="760">
+</p>
+
+Every highlight in the book, in reading order under its chapter title. Click an entry to open its page; the highlight flashes so you can spot it, and Shift + ← takes you back.
 
 ### Turning the page
 
@@ -148,10 +158,19 @@ The demo has public-domain prose (the opening of *Alice's Adventures in Wonderla
 | Select text to copy | Hold **Ctrl** and drag, then **Ctrl+C** |
 | Highlight text | Hold **Ctrl+Shift** and drag |
 | Remove a highlight | **Ctrl+Shift+click** on it |
+| Show / hide the highlights index | **Ctrl+B** |
+| Open a highlight's page | Click it in the index, or choose it with **↑ ↓** and press **Enter** |
+| Close the index | **Esc**, Ctrl+B, or click the page |
 | Follow a link or footnote | Click it (web links open in your browser) |
-| Go back to where you clicked a link | **Shift+←** or Shift+Backspace (repeat to retrace several links) |
+| Go back to where you clicked a link or highlight | **Shift+←** or Shift+Backspace (repeat to retrace several jumps) |
 
 Click the reader once to give it keyboard focus. Plain clicks never start a selection, so you can't select text by accident while turning pages.
+
+### Highlights in other readers
+
+Each highlight is saved in the chapter itself as `<span class="pyr-hl" style="background-color: rgba(250, 204, 21, 0.4) !important">…</span>`. The colour is translucent, so the text stays readable on light and dark themes, and it is `!important`, so it survives readers that repaint the book's colours with their own theme, like Foliate. Other readers show the highlighted text in colour; it doesn't appear in their own list of annotations.
+
+Saving rewrites the EPUB a moment after each change. The new file is written next to the book and then swapped in, so the book is never left half-written. Before pyReader changes a book for the first time, it copies the original to `~/.local/state/pyreader/originals/`. If the EPUB can't be written (it's read-only), or `highlights_in_book = false`, highlights are kept in pyReader's state file instead. Highlights made by earlier versions of pyReader move into the book the next time you open it.
 
 ### Commands
 
@@ -173,6 +192,7 @@ text_color = "#f5f5f7"    # body text colour: hex ("#f5f5f7") or a name ("white"
 animations = true         # page-turn animation
 justify = true            # justified text (false = ragged right)
 hyphenate = true          # hyphenation in the book's language
+highlights_in_book = true # save highlights inside the EPUB (false = pyReader's state file only)
 avoid_windows = ["pySysMon", "pyQuotes"]  # fill the space to the left of these windows
 reserve_right = 876       # space kept free on the right when none of them are running
 margin = 24               # distance from the screen edges
@@ -187,9 +207,9 @@ Not using pySysMon or pyQuotes? Set `reserve_right = 24` and pyReader fills the 
 | What | Where |
 |---|---|
 | Settings | `~/.config/pyreader/pyreader.toml` |
-| Page, text size and highlights for each book | `~/.local/state/pyreader/state.json` |
-
-Highlights are stored as positions within each chapter, together with the highlighted text.
+| Highlights | Inside the EPUB file itself |
+| Page and text size for each book (and highlights in read-only books) | `~/.local/state/pyreader/state.json` |
+| Each book as it was before pyReader first saved a highlight in it | `~/.local/state/pyreader/originals/` |
 
 ## Start at login
 
@@ -241,6 +261,12 @@ It asks the window manager to keep it below other windows (`_NET_WM_STATE_BELOW`
 **Keys don't turn the page.**
 Click the reader once so it has keyboard focus.
 
+**Highlights don't show in another reader.**
+They're part of the book's text styling, so they show in readers that display the book's own styles. Foliate, Calibre and other browser-engine readers do. A reader that ignores book styles, or a "publisher styles off" setting, hides them. Highlights inside equations aren't coloured, in pyReader or elsewhere.
+
+**I want my book back exactly as it was.**
+Copy it back from `~/.local/state/pyreader/originals/` (the file name starts with a short code, followed by the book's name). Removing every highlight with Ctrl+Shift+click also leaves the text as it was.
+
 **Equations look plain or symbols are missing.**
 The book may use images or LaTeX text instead of MathML; pyReader shows those as they are. MathML is drawn with the bundled STIX Two Math font.
 
@@ -250,7 +276,7 @@ The book may use images or LaTeX text instead of MathML; pyReader shows those as
 pyreader.py             The application (window, EPUB parsing, config, state)
 web/reader.html         Reader interface
 web/reader.css          "Midnight Ink" theme
-web/reader.js           Pagination, page turns, highlights, MathML fix-ups
+web/reader.js           Pagination, page turns, highlights and their index, MathML fix-ups
 web/fonts/              STIX Two Math (SIL Open Font License)
 samples/                Demo EPUB and the script that builds it
 install.sh              User-space installer / uninstaller

@@ -19,7 +19,9 @@ const PYR = (() => {
   const S = {
     book: null, settings: {}, scale: 1,
     chapter: 0, page: 0, pages: 1,
-    highlights: {}, L: null,
+    highlights: {},              // href -> highlights kept in pyReader's state file (text offsets)
+    baked: {},                   // href -> [{id, text}] highlights saved inside the EPUB
+    L: null,
     loadToken: 0, animating: false, busy: false,
     back: [],                    // places left by following links (Shift+← returns)
   };
@@ -133,9 +135,11 @@ const PYR = (() => {
                                break-inside: avoid; image-rendering: auto; }
       img { height: auto; }
       ::selection { background: rgba(125, 211, 252, 0.32); }
-      mark.pyr-hl { background: rgba(253, 230, 138, 0.26) !important; color: #fff3c4 !important;
+      span.pyr-hl { background: rgba(253, 230, 138, 0.26) !important; color: #fff3c4 !important;
                     border-radius: 3px; box-shadow: inset 0 -2px 0 rgba(253, 230, 138, 0.75);
                     -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+      span.pyr-hl.pyr-flash { animation: pyr-flash 1.6s ease-out; }
+      @keyframes pyr-flash { 0%, 35% { box-shadow: 0 0 0 3px rgba(253, 230, 138, 0.9), 0 0 18px rgba(253, 230, 138, 0.6); } }
       .pyr-dropcap::first-letter { float: left; font-family: var(--pyr-ui); font-weight: bold; font-size: 3.4em;
                     line-height: 0.82; margin: 0.06em 0.1em 0 0; color: #c4b5fd !important; }
     `;
@@ -263,11 +267,13 @@ const PYR = (() => {
     paginate();
     let page = 0;
     if (opts.anchor) page = pageOfAnchor(opts.anchor);
+    else if (opts.highlight) page = pageOfElement(d.querySelector(hlSelector(opts.highlight)));
     else if (opts.toEnd) page = S.pages - 1;
     else if (opts.fraction) page = Math.floor(opts.fraction * S.pages + 1e-6);
     showPage(page);
     frame.style.opacity = 1;
     S.busy = false;
+    if (opts.highlight) flash(opts.highlight);
     // Late-loading images or fonts can change the page count
     setTimeout(() => { if (token === S.loadToken) repaginateKeepingPlace(); }, 600);
   }
@@ -312,13 +318,16 @@ const PYR = (() => {
     showPage(Math.floor(frac * S.pages + 1e-6));
   }
 
+  function pageOfElement(el) {
+    if (!el) return 0;
+    const rect = el.getClientRects()[0] || el.getBoundingClientRect();   // where it starts
+    const col = Math.floor((rect.left + win().scrollX + 1) / (S.L.colW + S.L.colGap));
+    return clamp(Math.floor(col / S.L.perView), 0, S.pages - 1);
+  }
+
   function pageOfAnchor(id) {
     const d = doc();
-    const el = d.getElementById(id) || d.getElementsByName(id)[0];
-    if (!el) return 0;
-    const x = el.getBoundingClientRect().left + win().scrollX;
-    const col = Math.floor((x + 1) / (S.L.colW + S.L.colGap));
-    return clamp(Math.floor(col / S.L.perView), 0, S.pages - 1);
+    return pageOfElement(d.getElementById(id) || d.getElementsByName(id)[0]);
   }
 
   // ── Hyphenation (soft hyphens from Python's Pyphen, in the book's language) ─
@@ -438,7 +447,13 @@ const PYR = (() => {
 
   function onKeyDown(e) {
     if (e.key === "Control") { setSelectMode(true); return; }
+    if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "b") {
+      toggleIndex();
+      e.preventDefault();
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (index.open && onIndexKey(e)) { e.preventDefault(); return; }
     switch (e.key) {
       case "ArrowRight": case "PageDown": case " ": next(); break;
       case "ArrowLeft": case "Backspace": e.shiftKey ? goBack() : prev(); break;
@@ -460,6 +475,7 @@ const PYR = (() => {
     d.addEventListener("keydown", onKeyDown);
     d.addEventListener("keyup", onKeyUp);
     d.addEventListener("mousedown", (e) => {
+      if (index.open) toggleIndex(false);     // a click on the page closes the highlights index
       if (e.button !== 0) return;
       if (!e.ctrlKey) {                       // plain clicks never start a selection
         e.preventDefault();
@@ -482,9 +498,9 @@ const PYR = (() => {
     d.addEventListener("click", (e) => {
       const target = e.target && e.target.closest ? e.target : null;
       if (!target) return;
-      const mark = target.closest("mark.pyr-hl");
+      const mark = target.closest("span.pyr-hl");
       if (mark && e.ctrlKey && e.shiftKey && d.getSelection().isCollapsed) {
-        removeHighlight(d, mark.dataset.id);
+        removeHighlight(d, mark.getAttribute("data-pyr-id"));
         e.preventDefault();
         return;
       }
@@ -521,11 +537,15 @@ const PYR = (() => {
     if (idx < 0 || (idx === S.chapter && !anchor)) return;
     // Remember the page with the link. Its id, when it has one, finds that
     // page again even if the text size or window changed in the meantime.
-    S.back.push({ chapter: S.chapter, fraction: S.pages ? S.page / S.pages : 0, anchor: a.id || null });
-    if (S.back.length > 50) S.back.shift();
+    rememberPlace(a.id || null);
     if (idx === S.chapter) showPage(pageOfAnchor(anchor), animationsOn(), 1);
     else loadChapter(idx, { anchor });
     toast("Shift+← to go back");
+  }
+
+  function rememberPlace(anchor) {
+    S.back.push({ chapter: S.chapter, fraction: S.pages ? S.page / S.pages : 0, anchor });
+    if (S.back.length > 50) S.back.shift();
   }
 
   function goBack() {
@@ -563,9 +583,20 @@ const PYR = (() => {
     return str.length;
   }
 
-  function addHighlight(d, range) {
+  // Highlights saved in the book count only the text pyReader shows unchanged:
+  // not equations or SVG, whose letters it rewrites for display.
+  const bookText = (d) => textNodes(d).filter((n) => !unwrappable(n));
+  const hlSelector = (id) => `span.pyr-hl[data-pyr-id="${CSS.escape(id)}"]`;
+  const XHTML_NS = "http://www.w3.org/1999/xhtml";
+  // How a saved highlight looks in other readers. !important, because readers
+  // such as Foliate repaint every background in their themes; translucent, so
+  // the reader's own text colour stays readable on light and dark themes.
+  // (applyHighlights() removes it on screen here, where pyReader's CSS styles it.)
+  const BOOK_HL_STYLE = "background-color: rgba(250, 204, 21, 0.4) !important;";
+
+  function rangeOffsets(nodes, range) {
     let pos = 0, start = null, end = null;
-    for (const n of textNodes(d)) {
+    for (const n of nodes) {
       const len = clean(n.nodeValue).length;
       if (range.intersectsNode(n)) {
         if (start === null) start = pos + (n === range.startContainer ? clean(n.nodeValue.slice(0, range.startOffset)).length : 0);
@@ -573,19 +604,32 @@ const PYR = (() => {
       }
       pos += len;
     }
-    if (start === null || end <= start) return;
-    const h = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), start, end,
+    return start === null || end <= start ? null : { start, end };
+  }
+
+  function addHighlight(d, range) {
+    const inBook = S.settings.saveInBook;
+    const nodes = inBook ? bookText(d) : textNodes(d);
+    const at = rangeOffsets(nodes, range);
+    if (!at) return;
+    const h = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...at,
                 text: clean(range.toString()).slice(0, 300) };
-    wrap(d, h);
-    const list = (S.highlights[chapter().href] ||= []);
-    list.push(h);
-    send({ t: "highlights", href: chapter().href, list });
+    wrap(d, h, nodes);
+    const href = chapter().href;
+    if (inBook) {
+      editChapter(href, (src) => wrap(src, h, bookText(src), BOOK_HL_STYLE));
+    } else {
+      (S.highlights[href] ||= []).push(h);
+      saveStateHighlights(href);
+    }
     toast("Highlighted ✦");
   }
 
-  function wrap(d, h) {
-    let pos = 0;
-    for (const n of textNodes(d)) {
+  // Wraps the text from h.start to h.end (counted over `nodes`) in spans;
+  // returns how many. `style` marks a span written into the book's own file.
+  function wrap(d, h, nodes = textNodes(d), style = null) {
+    let pos = 0, count = 0;
+    for (const n of nodes) {
       const len = clean(n.nodeValue).length;
       const cs = Math.max(h.start, pos) - pos, ce = Math.min(h.end, pos + len) - pos;
       pos += len;
@@ -595,32 +639,251 @@ const PYR = (() => {
       let target = n;
       if (s > 0) target = target.splitText(s);
       if (e - s < target.nodeValue.length) target.splitText(e - s);
-      const mark = d.createElement("mark");
-      mark.className = "pyr-hl";
-      mark.dataset.id = h.id;
-      mark.title = "Ctrl+Shift+click to remove";
-      target.parentNode.insertBefore(mark, target);
-      mark.appendChild(target);
+      const span = d.createElementNS(XHTML_NS, "span");
+      span.setAttribute("class", "pyr-hl");
+      span.setAttribute("data-pyr-id", h.id);
+      if (style) span.setAttribute("style", style);
+      else span.title = "Ctrl+Shift+click to remove";
+      target.parentNode.insertBefore(span, target);
+      span.appendChild(target);
+      count++;
     }
+    return count;
+  }
+
+  function unwrap(d, id) {
+    const spans = d.querySelectorAll(hlSelector(id));
+    for (const span of spans) {
+      const parent = span.parentNode;
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+      parent.normalize();
+    }
+    return spans.length;
   }
 
   function removeHighlight(d, id) {
-    for (const mark of d.querySelectorAll(`mark.pyr-hl[data-id="${CSS.escape(id)}"]`)) {
-      const parent = mark.parentNode;
-      while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
-      parent.removeChild(mark);
-      parent.normalize();
-    }
     const href = chapter().href;
-    const list = (S.highlights[href] || []).filter((h) => h.id !== id);
-    if (list.length) S.highlights[href] = list; else delete S.highlights[href];
-    send({ t: "highlights", href, list });
+    const inBook = (S.baked[href] || []).some((h) => h.id === id);
+    if (inBook && !S.settings.bookWritable) { toast("This book is read-only", "error"); return; }
+    unwrap(d, id);
+    if (inBook) editChapter(href, (src) => unwrap(src, id));
+    if ((S.highlights[href] || []).some((h) => h.id === id)) {
+      S.highlights[href] = S.highlights[href].filter((h) => h.id !== id);
+      if (!S.highlights[href].length) delete S.highlights[href];
+      saveStateHighlights(href);
+    }
     toast("Highlight removed");
   }
 
+  function saveStateHighlights(href) {
+    // (highlights already saved in the book never go back to the state file)
+    const inBook = new Set((S.baked[href] || []).map((h) => h.id));
+    send({ t: "highlights", href, list: (S.highlights[href] || []).filter((h) => !inBook.has(h.id)) });
+    if (index.open) renderIndex();
+  }
+
   function applyHighlights(d) {
+    // Highlights saved in the book are already in the chapter
+    for (const span of d.querySelectorAll("span.pyr-hl[style]")) {
+      span.removeAttribute("style");
+      span.title = "Ctrl+Shift+click to remove";
+    }
     const list = [...(S.highlights[chapter().href] || [])].sort((a, b) => a.start - b.start);
-    for (const h of list) wrap(d, h);
+    for (const h of list) if (!d.querySelector(hlSelector(h.id))) wrap(d, h);
+  }
+
+  function flash(id) {
+    const spans = [...doc().querySelectorAll(hlSelector(id))];
+    for (const s of spans) s.classList.add("pyr-flash");
+    setTimeout(() => spans.forEach((s) => s.classList.remove("pyr-flash")), 1700);
+  }
+
+  // ── Highlights written into the EPUB ────────────────────────────────────
+  // The chapter's original file is edited (not the page on screen, which
+  // pyReader has hyphenated and restyled) and handed to Python, which writes
+  // it into the book. Edits run one at a time, each on the previous result.
+  const sources = new Map();     // href -> {text, type}: chapters as last edited
+  let edits = Promise.resolve();
+
+  async function chapterSource(href) {
+    if (sources.has(href)) return sources.get(href);
+    const res = await fetch(bookUrl(href));
+    if (!res.ok) throw new Error(`can't read ${href}`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const enc = bytes[0] === 0xFF && bytes[1] === 0xFE ? "utf-16le" : bytes[0] === 0xFE && bytes[1] === 0xFF ? "utf-16be" : "utf-8";
+    return { text: new TextDecoder(enc).decode(bytes), type: (res.headers.get("content-type") || "").split(";")[0] };
+  }
+
+  function parseChapter(src) {
+    const parser = new DOMParser();
+    if (src.type !== "text/html") {
+      const d = parser.parseFromString(src.text, "application/xhtml+xml");
+      if (!d.getElementsByTagName("parsererror").length) return d;
+    }
+    return parser.parseFromString(src.text, "text/html");   // as the reader falls back to
+  }
+
+  function serializeChapter(d, src) {
+    const xml = new XMLSerializer();
+    const asHtml = src.type === "text/html";
+    // (an HTML parser turns the XML declaration into a comment)
+    const nodes = [...d.childNodes].filter((n) => !(n.nodeType === Node.COMMENT_NODE && /^\?xml\s/.test(n.data)));
+    const parts = nodes.map((n) =>
+      !asHtml ? xml.serializeToString(n)
+      : n.nodeType === Node.ELEMENT_NODE ? n.outerHTML
+      : n.nodeType === Node.COMMENT_NODE ? `<!--${n.data}-->` : xml.serializeToString(n));
+    // The XML declaration isn't part of the DOM; Python writes UTF-8
+    const decl = src.text.match(/^﻿?\s*(<\?xml\s[^>]*\?>)/);
+    if (decl) parts.unshift(decl[1].replace(/encoding\s*=\s*(["'])[^"']*\1/, 'encoding="utf-8"'));
+    return parts.join("\n") + "\n";
+  }
+
+  // `edit(doc)` changes the parsed chapter and returns whether it did.
+  function editChapter(href, edit, extra = {}) {
+    const bookId = S.book.id;
+    const job = edits.then(async () => {
+      if (!S.book || S.book.id !== bookId) return false;
+      const src = await chapterSource(href);
+      const d = parseChapter(src);
+      if (!edit(d) || !S.book || S.book.id !== bookId) return false;
+      const text = serializeChapter(d, src);
+      sources.set(href, { text, type: src.type });
+      send({ t: "chapter", href, content: text, ...extra });
+      return true;
+    }).catch((e) => {
+      toast(`Couldn't save the highlight in the book: ${e.message}`, "error");
+      return false;
+    });
+    edits = job;
+    return job;
+  }
+
+  // Highlights from the state file (from older versions of pyReader, or made
+  // while the book was read-only) move into the book once it can be written.
+  // Python drops them from the state file after the EPUB is saved.
+  function migrate() {
+    if (!S.settings.saveInBook) return;
+    for (const [href, list] of Object.entries(S.highlights)) {
+      const inBook = new Set((S.baked[href] || []).map((h) => h.id));
+      const todo = list.filter((h) => !inBook.has(h.id));
+      if (!todo.length) continue;
+      const done = [];
+      editChapter(href, (src) => {
+        // Their offsets counted equations as displayed, after fixMath()
+        const shown = src.cloneNode(true);
+        fixMath(shown);
+        for (const h of todo) {
+          const at = src.querySelector(hlSelector(h.id)) ? "saved" : bookOffsets(shown, h);
+          if (at === "saved" || (at && wrap(src, { ...h, ...at }, bookText(src), BOOK_HL_STYLE))) done.push(h.id);
+        }
+        return done.length > 0;
+      }, { migrated: done });
+    }
+  }
+
+  function bookOffsets(d, h) {
+    let pos = 0, kept = 0, start = null, end = null;
+    for (const n of textNodes(d)) {
+      const len = clean(n.nodeValue).length, skip = unwrappable(n);
+      if (start === null && h.start < pos + len) start = kept + (skip ? 0 : h.start - pos);
+      if (end === null && h.end <= pos + len) end = kept + (skip ? 0 : h.end - pos);
+      pos += len;
+      if (!skip) kept += len;
+    }
+    if (end === null) end = kept;
+    return start === null || end <= start ? null : { start, end };
+  }
+
+  function baked(href, list) {
+    if (list && list.length) S.baked[href] = list; else delete S.baked[href];
+    if (index.open) renderIndex();
+  }
+
+  // ── Highlights index (Ctrl+B): slides in over the pages ─────────────────
+  const index = { open: false, sel: 0, items: [] };
+
+  function indexItems() {
+    const items = [];
+    if (!S.book) return items;
+    S.book.chapters.forEach((ch, chapterIdx) => {
+      const inBook = S.baked[ch.href] || [];
+      const ids = new Set(inBook.map((h) => h.id));
+      const kept = (S.highlights[ch.href] || []).filter((h) => !ids.has(h.id)).sort((a, b) => a.start - b.start);
+      for (const h of [...inBook, ...kept]) items.push({ chapter: chapterIdx, id: h.id, text: h.text });
+    });
+    return items;
+  }
+
+  function renderIndex() {
+    index.items = indexItems();
+    index.sel = clamp(index.sel, 0, Math.max(0, index.items.length - 1));
+    const list = $("hlList");
+    list.textContent = "";
+    $("hlCount").textContent = index.items.length || "";
+    const li = (cls, text) => {
+      const el = document.createElement("li");
+      el.className = cls;
+      el.textContent = text;
+      return list.appendChild(el);
+    };
+    if (!index.items.length) {
+      li("hl-empty", S.book ? "No highlights yet. Hold Ctrl+Shift and drag over text to highlight it."
+                            : "No book open.");
+      return;
+    }
+    let heading = null;
+    index.items.forEach((it, i) => {
+      const ch = S.book.chapters[it.chapter];
+      const title = ch.title && ch.title !== S.book.title ? ch.title : `Section ${it.chapter + 1}`;
+      if (title !== heading) li("hl-chapter", (heading = title));
+      const el = li("hl-item" + (i === index.sel ? " sel" : ""), it.text || "…");
+      el.dataset.i = i;
+    });
+  }
+
+  function toggleIndex(show = !index.open) {
+    index.open = show;
+    $("hlPanel").classList.toggle("open", show);
+    if (show) { renderIndex(); scrollToSelected(); }
+  }
+
+  function scrollToSelected() {
+    const el = $("hlList").querySelector(".sel");
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }
+
+  function onIndexKey(e) {
+    const n = index.items.length;
+    switch (e.key) {
+      case "ArrowDown": case "ArrowUp":
+        if (!n) return true;
+        index.sel = clamp(index.sel + (e.key === "ArrowDown" ? 1 : -1), 0, n - 1);
+        $("hlList").querySelectorAll(".hl-item").forEach((el) => el.classList.toggle("sel", +el.dataset.i === index.sel));
+        scrollToSelected();
+        return true;
+      case "Enter": if (n) openHighlight(index.items[index.sel]); return true;
+      case "Escape": toggleIndex(false); return true;
+      default: return false;
+    }
+  }
+
+  // Opens the page with the highlight; Shift+← comes back.
+  function openHighlight(it) {
+    if (!S.book || S.busy) return;
+    if (S.animating) finishTurn();
+    toggleIndex(false);
+    if (it.chapter !== S.chapter) {
+      rememberPlace(null);
+      loadChapter(it.chapter, { highlight: it.id });
+    } else {
+      const page = pageOfElement(doc().querySelector(hlSelector(it.id)));
+      flash(it.id);
+      if (page === S.page) return;
+      rememberPlace(null);
+      showPage(page, animationsOn(), page > S.page ? 1 : -1);
+    }
+    toast("Shift+← to go back");
   }
 
   // ── Chrome: header, folios, progress ────────────────────────────────────
@@ -656,6 +919,9 @@ const PYR = (() => {
 
   function showMessage(title, html, isError) {
     S.book = null;
+    S.baked = {};
+    S.highlights = {};
+    toggleIndex(false);
     S.loadToken++;
     frame.removeAttribute("src");
     frame.style.opacity = 0;
@@ -688,12 +954,16 @@ const PYR = (() => {
     S.book = p.book;
     S.back = [];
     S.highlights = p.highlights || {};
+    S.baked = p.baked || {};
+    sources.clear();
     $("title").textContent = p.book.title;
     $("author").textContent = p.book.author ? "by " + p.book.author : "";
     S.L = computeLayout();
     applyLayout(S.L);
     const pos = p.position || {};
     loadChapter(pos.chapter || 0, { fraction: pos.fraction || 0 });
+    if (index.open) renderIndex();
+    migrate();
   }
 
   function settings(s) {
@@ -702,6 +972,7 @@ const PYR = (() => {
     S.L = computeLayout();
     applyLayout(S.L);
     loadChapter(S.chapter, { fraction: S.pages ? S.page / S.pages : 0 });  // re-applies fonts & hyphenation
+    migrate();
   }
 
   // ── Wiring ───────────────────────────────────────────────────────────────
@@ -709,10 +980,17 @@ const PYR = (() => {
   document.addEventListener("keyup", onKeyUp);
   window.addEventListener("blur", () => setSelectMode(false));
   document.addEventListener("wheel", onWheel, { passive: true });
+  const panel = $("hlPanel");
+  panel.addEventListener("wheel", (e) => e.stopPropagation(), { passive: true });   // scrolls the list, not the book
+  panel.addEventListener("click", (e) => {
+    const item = e.target.closest(".hl-item");
+    if (item) { index.sel = +item.dataset.i; openHighlight(index.items[index.sel]); }
+  });
+  document.addEventListener("mousedown", (e) => { if (index.open && !panel.contains(e.target)) toggleIndex(false); });
   let resizeTimer = null;
   window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(relayout, 150); });
   tickClock();
   setInterval(tickClock, 1000);
 
-  return { open, settings, toast, hyphenated };
+  return { open, settings, toast, hyphenated, baked };
 })();

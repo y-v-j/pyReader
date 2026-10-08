@@ -9,24 +9,31 @@ Qt WebEngine in the same "Midnight Ink" theme as pySysMon and pyQuotes.
   (`book = "~/Books/some-book.epub"`); saving that file opens the book at once.
 - The window fills the desktop space left of pySysMon / pyQuotes and is kept
   below all other windows (EWMH hints via ctypes + libX11).
-- Reading position, text size and highlights are remembered per book in
-  ~/.local/state/pyreader/state.json.
+- Reading position and text size are remembered per book in
+  ~/.local/state/pyreader/state.json. Highlights are written into the EPUB
+  itself, so other readers (Foliate, Calibre, ...) show them too.
 
 Keys: ← / → turn pages, a / z change the text size, Shift + ← returns to the
-page a link or footnote was followed from.
+page a link or footnote was followed from, Ctrl + B lists the highlights.
 Ctrl + drag selects text (Ctrl+C copies); Ctrl + Shift + drag highlights it,
 Ctrl + Shift + click on a highlight removes it.
 """
 
+import contextlib
 import ctypes
 import ctypes.util
 import hashlib
+import html
 import json
 import mimetypes
 import os
 import posixpath
+import re
+import shutil
 import signal
+import stat
 import sys
+import threading
 import tomllib
 import zipfile
 import xml.etree.ElementTree as ET
@@ -40,7 +47,7 @@ except ImportError:
 # Keeping a window below others needs X11 (XWayland on Wayland sessions)
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
-from PySide6.QtCore import QBuffer, QFileSystemWatcher, QIODevice, Qt, QTimer, QUrl  # noqa: E402
+from PySide6.QtCore import QBuffer, QFileSystemWatcher, QIODevice, Qt, QTimer, QUrl, Signal  # noqa: E402
 from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 from PySide6.QtWebEngineCore import (  # noqa: E402
@@ -55,6 +62,7 @@ CONFIG_PATH = os.path.join(CONFIG_DIR, "pyreader.toml")
 STATE_DIR = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
                          "pyreader")
 STATE_PATH = os.path.join(STATE_DIR, "state.json")
+ORIGINALS_DIR = os.path.join(STATE_DIR, "originals")  # each book as it was before pyReader first changed it
 
 SCHEME = b"pyreader"
 APP_URL = "pyreader://local/app/reader.html"
@@ -97,6 +105,10 @@ justify = true
 
 # Hyphenate long words (in the book's language) so justified lines have even spacing.
 hyphenate = true
+
+# Save highlights inside the EPUB file, so other readers (Foliate, Calibre,
+# KOReader...) show them too. false = keep them in pyReader's own state file.
+highlights_in_book = true
 '''
 
 DEFAULT_CONFIG = {
@@ -111,6 +123,7 @@ DEFAULT_CONFIG = {
     "opacity": 0.97,
     "justify": True,
     "hyphenate": True,
+    "highlights_in_book": True,
 }
 
 
@@ -172,6 +185,12 @@ NS = {
 EPUB_TYPE = "{http://www.idpf.org/2007/ops}type"
 HTML_TYPES = ("application/xhtml+xml", "text/html", "application/x-dtbook+xml")
 
+# A highlight saved in a chapter: one <span class="pyr-hl" data-pyr-id="…"> per
+# text node it covers (reader.js writes them; they never contain other tags).
+HL_SPAN = re.compile(r'<span\b[^>]*?\sdata-pyr-id="([^"]*)"[^>]*>([^<]*)</span>')
+HL_BREAK = re.compile(r"<(?:br|/?(?:p|div|li|h[1-6]|blockquote|tr|td|th|dt|dd|pre|figcaption|section|aside))\b", re.I)
+TAG = re.compile(r"<[^>]*>")
+
 
 class Book:
     def __init__(self, path):
@@ -181,6 +200,11 @@ class Book:
         self.lower_names = {n.lower(): n for n in self.names}
         st = os.stat(path)
         self.id = hashlib.sha1(f"{path}:{st.st_mtime_ns}:{st.st_size}".encode()).hexdigest()[:12]
+        # Chapters rewritten with highlights: served from here at once, and
+        # written into the EPUB file a moment later (see Reader.save_book).
+        self.overrides = {}
+        self.version = self.saved = 0
+        self.migrated = {}   # href -> ids of state-file highlights now written into the chapter
 
         self._check_drm()
         container = ET.fromstring(self.read("META-INF/container.xml"))
@@ -248,7 +272,50 @@ class Book:
         return self.lower_names[name.lower()]  # KeyError if missing
 
     def read(self, name):
-        return self.zip.read(self.real_name(name))
+        name = self.real_name(name)
+        data = self.overrides.get(name)
+        return self.zip.read(name) if data is None else data
+
+    def writable(self):
+        real = os.path.realpath(self.path)
+        return os.access(real, os.W_OK) and os.access(os.path.dirname(real), os.W_OK)
+
+    def set_chapter(self, href, data):
+        """Replace a chapter's file; False if it is unchanged."""
+        if data == self.read(href):
+            return False
+        self.overrides[self.real_name(href)] = data
+        self.version += 1
+        return True
+
+    def chapter_highlights(self, href):
+        """[{id, text}] for the highlights saved in a chapter, in reading order."""
+        try:
+            src = self.read(href).decode("utf-8", "replace")
+        except (KeyError, OSError, zipfile.BadZipFile):
+            return []
+        if "data-pyr-id" not in src:
+            return []
+        out, by_id, ends = [], {}, {}
+        for m in HL_SPAN.finditer(src):
+            hid, text = m.group(1), html.unescape(m.group(2))
+            if hid not in by_id:
+                by_id[hid] = {"id": hid, "text": ""}
+                out.append(by_id[hid])
+            else:
+                # Between two parts: tags, spaces, or an equation (not wrapped, but highlighted)
+                gap = src[ends[hid]:m.start()]
+                text = (" " if HL_BREAK.search(gap) else "") + html.unescape(TAG.sub("", gap)) + text
+            by_id[hid]["text"] += text
+            ends[hid] = m.end()
+        for h in out:
+            h["text"] = " ".join(h["text"].split())[:400]
+        return out
+
+    def highlights(self):
+        """{chapter href: [{id, text}]} for every chapter with saved highlights."""
+        found = ((c["href"], self.chapter_highlights(c["href"])) for c in self.chapters)
+        return {href: hl for href, hl in found if hl}
 
     def _toc_titles(self, opf_dir, manifest, spine):
         """Map chapter file -> title from the EPUB 3 nav document or EPUB 2 NCX."""
@@ -286,6 +353,32 @@ class Book:
     def to_js(self):
         return {"id": self.id, "title": self.title, "author": self.author,
                 "language": self.language, "chapters": self.chapters}
+
+
+def write_epub(path, changes):
+    """Rewrite the EPUB at `path`, replacing the files in `changes` ({name: bytes}).
+
+    The new zip is written next to the book and swapped in atomically, so the
+    book is never left half-written. The first time a book is changed, the
+    original is copied to ORIGINALS_DIR."""
+    real = os.path.realpath(path)
+    backup = os.path.join(ORIGINALS_DIR, hashlib.sha1(real.encode()).hexdigest()[:8] + "-" + os.path.basename(real))
+    if not os.path.exists(backup):
+        os.makedirs(ORIGINALS_DIR, exist_ok=True)
+        shutil.copy2(real, backup)
+    tmp = os.path.join(os.path.dirname(real), f".{os.path.basename(real)}.pyreader-tmp")
+    try:
+        # Same order and compression per file: "mimetype" stays first and stored
+        with zipfile.ZipFile(real) as src, zipfile.ZipFile(tmp, "w") as out:
+            for info in src.infolist():
+                data = changes.get(info.filename)
+                out.writestr(info, src.read(info) if data is None else data)
+        os.chmod(tmp, stat.S_IMODE(os.stat(real).st_mode))
+        os.replace(tmp, real)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
 
 
 # ------------------------------------------------------------------------------
@@ -499,6 +592,8 @@ class X11:
 # Reader window
 # ------------------------------------------------------------------------------
 class Reader(QWebEngineView):
+    book_saved = Signal()  # from the thread that writes highlights into the EPUB
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("pyReader")
@@ -533,6 +628,11 @@ class Reader(QWebEngineView):
         self.reload_timer.timeout.connect(self.reload_config)
         self.save_timer = QTimer(self, singleShot=True, interval=800)
         self.save_timer.timeout.connect(lambda: save_state(self.state))
+        self.book_timer = QTimer(self, singleShot=True, interval=1000)
+        self.book_timer.timeout.connect(self.save_book)
+        self.saver = None
+        self.save_result = None
+        self.book_saved.connect(self.finish_save)
         self.place_timer = QTimer(self, interval=3000)
         self.place_timer.timeout.connect(self.place)
         self.place_timer.start()
@@ -593,6 +693,7 @@ class Reader(QWebEngineView):
             self.js("PYR.settings", self.reader_settings())
 
     def open_book(self, raw_path):
+        self.save_book(wait=True)
         self.book, self.book_error = None, None
         path = os.path.abspath(os.path.expanduser(str(raw_path).strip())) if raw_path else ""
         if not path:
@@ -612,10 +713,12 @@ class Reader(QWebEngineView):
 
     def reader_settings(self, cfg=None):
         cfg = cfg or self.config
+        writable = bool(self.book) and self.book.writable()
         return {"layout": self.layout_mode(cfg), "bodyFont": cfg.get("body_font", "Noto Serif"),
                 "textColor": self.css_color(cfg.get("text_color"), DEFAULT_CONFIG["text_color"]),
                 "animations": bool(cfg.get("animations", True)), "justify": bool(cfg.get("justify", True)),
-                "hyphenate": bool(cfg.get("hyphenate", True)) and pyphen is not None}
+                "hyphenate": bool(cfg.get("hyphenate", True)) and pyphen is not None,
+                "bookWritable": writable, "saveInBook": writable and bool(cfg.get("highlights_in_book", True))}
 
     @staticmethod
     def css_color(value, default):
@@ -645,10 +748,13 @@ class Reader(QWebEngineView):
                    "error": self.book_error or self.config_error, "book": None}
         if self.book:
             saved = self.state["books"].get(self.book.path, {})
+            baked = self.book.highlights()
+            if saved.get("highlights"):   # forget state-file highlights the EPUB already holds
+                self.forget_migrated(self.book, {href: {h["id"] for h in hl} for href, hl in baked.items()})
             payload.update(book=self.book.to_js(),
                            position={"chapter": saved.get("chapter", 0),
                                      "fraction": saved.get("fraction", 0.0)},
-                           highlights=saved.get("highlights", {}))
+                           highlights=saved.get("highlights", {}), baked=baked)
         self.js("PYR.open", payload)
 
     def js(self, fn, *args):
@@ -675,6 +781,23 @@ class Reader(QWebEngineView):
                 hl[msg["href"]] = msg["list"]
             else:
                 hl.pop(msg.get("href"), None)
+        elif kind == "chapter" and self.book:
+            # A chapter with highlights added or removed, to write into the EPUB
+            href, content = msg.get("href", ""), str(msg.get("content", ""))
+            if not content.strip():
+                return
+            try:
+                changed = self.book.set_chapter(href, content.encode("utf-8"))
+            except KeyError:
+                return
+            if msg.get("migrated"):
+                self.book.migrated.setdefault(href, set()).update(msg["migrated"])
+            self.js("PYR.baked", href, self.book.chapter_highlights(href))
+            if changed:
+                self.book_timer.start()
+            elif self.book.version == self.book.saved:
+                self.forget_migrated(self.book, self.book.migrated)   # already in the file
+            return
         elif kind == "scale":
             self.state["font_scale"] = float(msg.get("v", 1.0))
         elif kind == "hyph":
@@ -704,19 +827,80 @@ class Reader(QWebEngineView):
                 out[w] = h
         return out
 
+    # -- highlights written into the EPUB ------------------------------------------
+    def save_book(self, wait=False):
+        """Write the chapters changed by highlighting into the EPUB file: in a
+        thread, or before returning when the book is being closed (`wait`)."""
+        if self.saver and self.saver.is_alive():
+            if not wait:
+                self.book_timer.start()   # again once the running save is done
+                return
+            self.saver.join()
+        self.finish_save()
+        book = self.book
+        if not book or book.version == book.saved:
+            return
+        job = (book, book.version, dict(book.overrides), {h: set(ids) for h, ids in book.migrated.items()})
+
+        def work():
+            try:
+                write_epub(book.path, job[2])
+                err = ""
+            except (OSError, ValueError, KeyError, zipfile.BadZipFile) as e:
+                err = str(e) or type(e).__name__
+            self.save_result = job + (err,)
+
+        if wait:
+            work()
+            self.finish_save()
+        else:
+            self.saver = threading.Thread(target=lambda: (work(), self.book_saved.emit()), daemon=True)
+            self.saver.start()
+
+    def finish_save(self):
+        result, self.save_result = self.save_result, None
+        if not result:
+            return
+        book, version, _, migrated, err = result
+        if err:
+            log(f"Couldn't save highlights in {book.path}: {err}")
+            self.js("PYR.toast", f"Couldn't save highlights in {os.path.basename(book.path)}: {err}", "error")
+            return
+        book.saved = max(book.saved, version)
+        self.forget_migrated(book, migrated)
+
+    def forget_migrated(self, book, migrated):
+        """Drop highlights from the state file once the EPUB holds them."""
+        hl = self.state["books"].get(book.path, {}).get("highlights", {})
+        for href, ids in migrated.items():
+            left = [h for h in hl.get(href, []) if h.get("id") not in ids]
+            if left:
+                hl[href] = left
+            else:
+                hl.pop(href, None)
+            book.migrated.get(href, set()).difference_update(ids)
+        if migrated:
+            self.save_timer.start()
+
     def closeEvent(self, event):
+        self.save_book(wait=True)
         save_state(self.state)
         super().closeEvent(event)
 
 
-def main():
-    load_config()  # creates the default config on first run
+def register_scheme():
     scheme = QWebEngineUrlScheme(SCHEME)
     scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
     scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme | QWebEngineUrlScheme.Flag.LocalScheme
                     | QWebEngineUrlScheme.Flag.LocalAccessAllowed
-                    | QWebEngineUrlScheme.Flag.ContentSecurityPolicyIgnored)
+                    | QWebEngineUrlScheme.Flag.ContentSecurityPolicyIgnored
+                    | QWebEngineUrlScheme.Flag.FetchApiAllowed)   # reader.js fetches chapter sources
     QWebEngineUrlScheme.registerScheme(scheme)
+
+
+def main():
+    load_config()  # creates the default config on first run
+    register_scheme()
 
     app = QApplication(sys.argv)
     app.setApplicationName("pyReader")
@@ -725,7 +909,7 @@ def main():
     reader.show()
     QTimer.singleShot(300, reader.keep_on_desktop)
     QTimer.singleShot(1500, reader.keep_on_desktop)  # re-assert once KWin has settled
-    app.aboutToQuit.connect(lambda: save_state(reader.state))
+    app.aboutToQuit.connect(lambda: (reader.save_book(wait=True), save_state(reader.state)))
     # Quit cleanly (saving the reading position) when the session ends.
     # The timer lets Python run its signal handlers while Qt's loop is busy.
     signal.signal(signal.SIGTERM, lambda *_: app.quit())
