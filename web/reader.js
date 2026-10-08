@@ -131,6 +131,11 @@ const PYR = (() => {
            background: linear-gradient(90deg, #7dd3fc, #c4b5fd, #f9a8d4) !important; }
       pre { background-color: rgba(255, 255, 255, 0.035) !important; }
       figcaption, figcaption *, .caption, .caption * { color: #9a9ab8 !important; }
+      ${S.settings.font ? `
+      /* The reader's chosen font replaces the book's for the text, not for headings, code or equations */
+      body, body :not(h1, h2, h3, h4, h5, h6, pre, code, kbd, samp, tt, math, svg,
+                      :is(h1, h2, h3, h4, h5, h6, pre, code, kbd, samp, tt, math, svg) *) {
+        font-family: ${S.settings.font} !important; }` : ""}
       img, svg, video, object { max-height: ${L.frameH - 6}px !important; object-fit: contain;
                                break-inside: avoid; image-rendering: auto; }
       img { height: auto; }

@@ -80,8 +80,11 @@ book = ""
 #   "auto" = two pages when there is room, otherwise one
 pages = "auto"
 
-# Font for body text when the book doesn't choose one.
-body_font = "Noto Serif"
+# Font for the book's text. Keep one of these lines and comment out the other
+# with #. Comment out both to use the book's own fonts (Noto Serif if it has none).
+# Headings, code and equations keep their own fonts.
+font = ["Noto Serif", "Liberation Serif", "serif"]
+# font = ["FantasqueSansM Nerd Font", "Fantasque Sans Mono", "monospace"]
 
 # Colour of the body text: a hex colour ("#f5f5f7") or a name ("white", "whitesmoke").
 text_color = "#f5f5f7"
@@ -715,6 +718,7 @@ class Reader(QWebEngineView):
         cfg = cfg or self.config
         writable = bool(self.book) and self.book.writable()
         return {"layout": self.layout_mode(cfg), "bodyFont": cfg.get("body_font", "Noto Serif"),
+                "font": self.css_font_family(cfg.get("font")),
                 "textColor": self.css_color(cfg.get("text_color"), DEFAULT_CONFIG["text_color"]),
                 "animations": bool(cfg.get("animations", True)), "justify": bool(cfg.get("justify", True)),
                 "hyphenate": bool(cfg.get("hyphenate", True)) and pyphen is not None,
@@ -725,6 +729,21 @@ class Reader(QWebEngineView):
         """A config colour as "#rrggbb" (safe to put in CSS); `default` if it isn't one."""
         color = QColor(str(value)) if value else QColor()
         return color.name() if color.isValid() else default
+
+    GENERIC_FONTS = {"serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "math",
+                     "ui-serif", "ui-sans-serif", "ui-monospace", "ui-rounded"}
+
+    @classmethod
+    def css_font_family(cls, value):
+        """`font` (["Noto Serif", "serif"] or '"Noto Serif", serif') as a CSS
+        font-family list (safe to put in CSS); "" when it isn't set."""
+        names = value.split(",") if isinstance(value, str) else value if isinstance(value, list) else []
+        out = []
+        for name in names:
+            name = str(name).strip().strip("\"'").strip()
+            if name and not any(c in name for c in '"\\;{}<>'):
+                out.append(name if name.lower() in cls.GENERIC_FONTS else f'"{name}"')
+        return ", ".join(out)
 
     @staticmethod
     def layout_mode(cfg):

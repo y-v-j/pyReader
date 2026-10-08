@@ -15,7 +15,7 @@ An EPUB reader that lives on your Linux desktop. It fills the free space beside 
 
 - **Reads like a book:** one page across the full window or two facing pages (your choice), page numbers on each page, a progress bar, and a 3D page-turn animation driven by the arrow keys.
 - **Typeset with care:** justified text with real hyphenation in the book's language (via [Pyphen](https://pyphen.org/)), a drop cap at the start of each chapter, and themed headings, quotations and rules.
-- **The book's own fonts:** embedded fonts and the book's typography are honoured. Noto Serif is used only when the book doesn't choose a font.
+- **Your font, or the book's:** set the text in Noto Serif or Fantasque Sans Mono, whatever font the book asks for. Comment out both choices to keep the book's own embedded fonts and typography. Headings, code and equations keep their own fonts either way.
 - **Equations:** MathML is rendered natively with the bundled STIX Two Math font: fractions, roots, integrals, matrices, bold vectors, chemistry.
 - **Sharp images:** pictures are shown at their native resolution and never stretched beyond it, so they never look grainy. Large images are scaled down to fit the page.
 - **Select, copy and highlight:** Ctrl + drag selects text to copy. Ctrl + Shift + drag highlights it in warm amber.
@@ -187,7 +187,8 @@ All settings are in `~/.config/pyreader/pyreader.toml`. Saved changes apply imme
 ```toml
 book = ""                 # path to the EPUB (~ allowed)
 pages = "auto"            # 1 = one full-width page, 2 = two facing pages, "auto" = 2 when there's room
-body_font = "Noto Serif"  # used when the book doesn't choose a font
+font = ["Noto Serif", "Liberation Serif", "serif"]                           # the book's text font: keep one
+# font = ["FantasqueSansM Nerd Font", "Fantasque Sans Mono", "monospace"]    # of these two lines
 text_color = "#f5f5f7"    # body text colour: hex ("#f5f5f7") or a name ("white")
 animations = true         # page-turn animation
 justify = true            # justified text (false = ragged right)
@@ -201,6 +202,18 @@ opacity = 0.97            # window opacity
 ```
 
 Not using pySysMon or pyQuotes? Set `reserve_right = 24` and pyReader fills the whole screen width.
+
+### Choosing the text font
+
+The config file has two `font` lines: Noto Serif and Fantasque Sans Mono. Keep the one you want and put a `#` in front of the other. Save, and the book re-renders in the new font.
+
+| Setting | Book text | Headings, code, equations |
+|---|---|---|
+| `font = ["Noto Serif", "Liberation Serif", "serif"]` | Noto Serif (Liberation Serif if Noto Serif isn't installed) | Unchanged |
+| `font = ["FantasqueSansM Nerd Font", "Fantasque Sans Mono", "monospace"]` | Fantasque Sans Mono, Nerd Font build first | Unchanged |
+| Both lines commented out | The book's own fonts (Noto Serif when it doesn't choose one) | Unchanged |
+
+The names go in order: each is used only when the one before it isn't installed. Any other installed font works too, for example `font = ["Literata", "serif"]`, and a CSS-style string such as `font = '"Noto Serif", serif'` is accepted as well.
 
 ### Where things are stored
 
