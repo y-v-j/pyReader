@@ -115,7 +115,7 @@ const PYR = (() => {
       html.pyr-select { user-select: text; cursor: text; }
       body { margin: 0 !important; padding: 0 !important; width: auto !important; max-width: none !important;
              height: auto !important; min-height: 0 !important; columns: auto !important; overflow: visible !important;
-             background: transparent !important; color: #e8e8f2 !important; font-size: 1rem !important; }
+             background: transparent !important; color: ${S.settings.textColor || "#f5f5f7"} !important; font-size: 1rem !important; }
       body * { color: inherit !important; background-color: transparent !important;
                border-color: rgba(196, 181, 253, 0.28) !important; max-width: 100% !important; }
       h1, h1 * { color: #c4b5fd !important; }

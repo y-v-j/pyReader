@@ -75,6 +75,9 @@ pages = "auto"
 # Font for body text when the book doesn't choose one.
 body_font = "Noto Serif"
 
+# Colour of the body text: a hex colour ("#f5f5f7") or a name ("white", "whitesmoke").
+text_color = "#f5f5f7"
+
 # Play the page-turn animation.
 animations = true
 
@@ -99,6 +102,7 @@ hyphenate = true
 DEFAULT_CONFIG = {
     "book": "",
     "body_font": "Noto Serif",
+    "text_color": "#f5f5f7",
     "animations": True,
     "avoid_windows": ["pySysMon", "pyQuotes"],
     "reserve_right": 876,
@@ -601,8 +605,15 @@ class Reader(QWebEngineView):
     def reader_settings(self, cfg=None):
         cfg = cfg or self.config
         return {"layout": self.layout_mode(cfg), "bodyFont": cfg.get("body_font", "Noto Serif"),
+                "textColor": self.css_color(cfg.get("text_color"), DEFAULT_CONFIG["text_color"]),
                 "animations": bool(cfg.get("animations", True)), "justify": bool(cfg.get("justify", True)),
                 "hyphenate": bool(cfg.get("hyphenate", True)) and pyphen is not None}
+
+    @staticmethod
+    def css_color(value, default):
+        """A config colour as "#rrggbb" (safe to put in CSS); `default` if it isn't one."""
+        color = QColor(str(value)) if value else QColor()
+        return color.name() if color.isValid() else default
 
     @staticmethod
     def layout_mode(cfg):

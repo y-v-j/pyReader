@@ -169,6 +169,7 @@ All settings are in `~/.config/pyreader/pyreader.toml`. Saved changes apply imme
 book = ""                 # path to the EPUB (~ allowed)
 pages = "auto"            # 1 = one full-width page, 2 = two facing pages, "auto" = 2 when there's room
 body_font = "Noto Serif"  # used when the book doesn't choose a font
+text_color = "#f5f5f7"    # body text colour: hex ("#f5f5f7") or a name ("white")
 animations = true         # page-turn animation
 justify = true            # justified text (false = ragged right)
 hyphenate = true          # hyphenation in the book's language
